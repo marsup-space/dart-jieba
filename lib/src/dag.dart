@@ -1,4 +1,4 @@
-import 'trie.dart';
+import 'flat_trie.dart';
 
 class Dag {
   final List<List<int>> _edges;
@@ -19,20 +19,21 @@ class Dag {
   int get length => _edges.length;
 }
 
-Dag buildDag(String sentence, Trie trie) {
+Dag buildDag(String sentence, FlatTrie trie) {
   final n = sentence.length;
   final dag = Dag(n);
 
   for (int k = 0; k < n; k++) {
-    var node = trie.root;
     bool found = false;
+    var nodeIdx = trie.rootIdx;
 
     for (int i = k; i < n; i++) {
-      final child = node.children?[sentence.codeUnitAt(i)];
-      if (child == null) break;
-      node = child;
-      if (node.isTerminal) {
-        dag.add(k, i + 1, node.freq);
+      final childIdx = trie.findChild(nodeIdx, sentence.codeUnitAt(i));
+      if (childIdx < 0) break;
+      nodeIdx = childIdx;
+      final freq = trie.freqOfIdx(nodeIdx);
+      if (freq > 0) {
+        dag.add(k, i + 1, freq);
         found = true;
       }
     }

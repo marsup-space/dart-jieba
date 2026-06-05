@@ -6,7 +6,6 @@ repository: https://github.com/marsup-space/dart-jieba
 environment:
   sdk: ^3.11.5
 
-dependencies:
 
 dev_dependencies:
   lints: ^6.0.0

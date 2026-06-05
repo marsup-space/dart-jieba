@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:dart_jieba/dart_jieba.dart';
 
 const _dictPath = 'assets/dict.txt';
