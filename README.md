@@ -61,24 +61,29 @@ Dictionary format same as Python jieba: `word freq tag` (freq and tag optional).
 
 ## 性能对比 / Performance
 
-Benchmark: 10,000 iterations, Dart AOT vs Python 3.14 + jieba, same machine.
+Benchmark: 10,000 iterations, same machine. Python 3.14 + jieba, Dart JIT (`dart run`), Dart AOT (`dart compile exe`).
 
-| 输入 / Input | Python jieba | dart_jieba (AOT) | 加速 / Speedup |
-|---|---|---|---|
-| 4 字 / 4 chars | 48 µs | 1.7 µs | **29×** |
-| 7 字 / 7 chars | 14 µs | 1.8 µs | **7.9×** |
-| 14 字 / 14 chars | 17 µs | 2.6 µs | **6.6×** |
-| 20 字混合 / 20 mixed | 22 µs | 6.6 µs | **3.4×** |
-| 100 字段落 / 100 chars | 89 µs | 19 µs | **4.7×** |
+### 分词吞吐 / Segmentation throughput
+
+| 输入 / Input | Python jieba | dart_jieba (JIT) | dart_jieba (AOT) | AOT 加速 / Speedup |
+|---|---|---|---|---|
+| 4 字 / 4 chars | 48 µs | 2.2 µs | 1.7 µs | **29×** |
+| 7 字 / 7 chars | 14 µs | 1.3 µs | 1.8 µs | **7.9×** |
+| 14 字 / 14 chars | 17 µs | 1.8 µs | 2.6 µs | **6.6×** |
+| 20 字混合 / 20 mixed | 22 µs | 4.7 µs | 6.5 µs | **3.4×** |
+| 100 字段落 / 100 chars | 89 µs | 15 µs | 18 µs | **4.7×** |
+
+> JIT 在部分负载上比 AOT 更快，因为运行时 profiling 可以内联热路径。
+> JIT can outperform AOT on some workloads due to runtime profiling and inline caching.
 
 ### 分词模式 / Cut mode throughput
 
-| 模式 / Mode | dart_jieba (AOT) |
-|---|---|
-| 精确 + HMM / Accurate + HMM | 1.75 µs/call |
-| 精确无 HMM / Accurate no HMM | 1.36 µs/call |
-| 全模式 / Full mode | 1.05 µs/call |
-| 搜索引擎 / Search mode | 1.97 µs/call |
+| 模式 / Mode | dart_jieba (JIT) | dart_jieba (AOT) |
+|---|---|---|
+| 精确 + HMM / Accurate + HMM | 1.42 µs/call | 1.78 µs/call |
+| 精确无 HMM / Accurate no HMM | 0.89 µs/call | 1.35 µs/call |
+| 全模式 / Full mode | 0.75 µs/call | 1.05 µs/call |
+| 搜索引擎 / Search mode | 1.78 µs/call | 1.96 µs/call |
 
 ### 词典加载 / Dictionary load
 
