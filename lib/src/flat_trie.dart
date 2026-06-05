@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'trie.dart';
+
 class FlatTrie {
   final Uint32List _freqs;
   final Uint32List _firstChild;
@@ -235,4 +237,63 @@ class FlatTrie {
   int get rootIdx => _rootIdx;
   int freqOfIdx(int nodeIdx) => _freqs[nodeIdx];
   int findChild(int parentIdx, int cp) => _findChild(parentIdx, cp);
+
+  static FlatTrie fromTrie(Trie trie, int totalFreq) {
+    final nodeIndex = <TrieNode, int>{};
+    final nodeList = <TrieNode>[];
+    nodeIndex[trie.root] = 0;
+    nodeList.add(trie.root);
+    int queueHead = 0;
+    while (queueHead < nodeList.length) {
+      final node = nodeList[queueHead++];
+      if (node.children != null) {
+        final sorted = node.children!.entries.toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
+        for (final entry in sorted) {
+          nodeIndex[entry.value] = nodeList.length;
+          nodeList.add(entry.value);
+        }
+      }
+    }
+
+    final nodeCount = nodeList.length;
+    int edgeCount = 0;
+    for (final node in nodeList) {
+      edgeCount += node.children?.length ?? 0;
+    }
+
+    final freqs = Uint32List(nodeCount);
+    final firstChild = Uint32List(nodeCount);
+    final childCount = Uint16List(nodeCount);
+    final edgeCps = Uint16List(edgeCount);
+    final edgeTargets = Uint32List(edgeCount);
+
+    int edgeOffset = 0;
+    for (int i = 0; i < nodeCount; i++) {
+      final node = nodeList[i];
+      freqs[i] = node.freq;
+      final kids = node.children;
+      if (kids != null && kids.isNotEmpty) {
+        final sorted = kids.entries.toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
+        firstChild[i] = edgeOffset;
+        childCount[i] = sorted.length;
+        for (final entry in sorted) {
+          edgeCps[edgeOffset] = entry.key;
+          edgeTargets[edgeOffset] = nodeIndex[entry.value]!;
+          edgeOffset++;
+        }
+      }
+    }
+
+    return FlatTrie._(
+      freqs,
+      firstChild,
+      childCount,
+      edgeCps,
+      edgeTargets,
+      0,
+      totalFreq,
+    );
+  }
 }

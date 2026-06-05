@@ -1,9 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'flat_trie.dart';
 import 'dag.dart';
 import 'route.dart';
 import 'hmm.dart';
+import 'trie.dart';
 
 final _reHanDefault = RegExp(r'[\u4E00-\u9FD5a-zA-Z0-9+#&\._%\-]+');
 final _reSkipDefault = RegExp(r'\r\n|\s');
@@ -56,7 +58,12 @@ class JiebaSegmenter {
   }
 
   static String _findDefaultDict() {
-    final candidates = ['assets/dict.txt', 'dart-jieba/assets/dict.txt'];
+    final candidates = [
+      'assets/dict.dgz',
+      'assets/dict.txt',
+      'dart-jieba/assets/dict.dgz',
+      'dart-jieba/assets/dict.txt',
+    ];
     for (final c in candidates) {
       if (File(c).existsSync()) return c;
     }
@@ -68,12 +75,42 @@ class JiebaSegmenter {
     if (!file.existsSync()) {
       throw StateError('Dictionary file not found: $path');
     }
-    // Fallback: build trie from text (slow path)
-    // For now, use the Map-based Trie and convert
-    // This should rarely be hit in production
-    throw StateError(
-      'Text dict loading removed. Run tool/build_dict_bin.dart first to generate dict.dgz',
-    );
+    final trie = Trie();
+    final text = utf8.decoder.convert(file.readAsBytesSync());
+    int total = 0;
+    int lineStart = 0;
+    final n = text.length;
+    while (lineStart < n) {
+      int lineEnd = lineStart;
+      while (lineEnd < n && text.codeUnitAt(lineEnd) != 0x0A) {
+        lineEnd++;
+      }
+      int spaceIdx = -1;
+      for (int i = lineStart; i < lineEnd; i++) {
+        if (text.codeUnitAt(i) == 0x20) {
+          spaceIdx = i;
+          break;
+        }
+      }
+      if (spaceIdx > lineStart) {
+        final word = text.substring(lineStart, spaceIdx);
+        int freqStart = spaceIdx + 1;
+        int freqEnd = freqStart;
+        while (freqEnd < lineEnd && text.codeUnitAt(freqEnd) != 0x20) {
+          freqEnd++;
+        }
+        int freq = 0;
+        for (int i = freqStart; i < freqEnd; i++) {
+          final d = text.codeUnitAt(i) - 0x30;
+          if (d < 0 || d > 9) break;
+          freq = freq * 10 + d;
+        }
+        trie.insert(word, freq);
+        total += freq;
+      }
+      lineStart = lineEnd + 1;
+    }
+    return FlatTrie.fromTrie(trie, total);
   }
 
   List<String> cut(String sentence, {bool cutAll = false, bool hmm = true}) {

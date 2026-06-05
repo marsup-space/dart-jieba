@@ -5,10 +5,15 @@ import 'package:test/test.dart';
 
 String _dictPath() {
   final dir = Directory.current.path;
-  if (File('$dir/assets/dict.txt').existsSync()) {
-    return '$dir/assets/dict.txt';
+  for (final candidate in [
+    '$dir/assets/dict.dgz',
+    '$dir/assets/dict.txt',
+    '$dir/dart-jieba/assets/dict.dgz',
+    '$dir/dart-jieba/assets/dict.txt',
+  ]) {
+    if (File(candidate).existsSync()) return candidate;
   }
-  return '$dir/dart-jieba/assets/dict.txt';
+  throw StateError('No dict found in $dir');
 }
 
 void main() {

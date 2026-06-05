@@ -49,15 +49,54 @@ jieba.cutForSearch('我来到北京清华大学');
 // [我, 来到, 北京, 清华, 华大, 大学, 清华大学]
 ```
 
+## 词典格式 / Dictionary formats
+
+dart_jieba 支持两种词典格式：
+
+| 格式 / Format | 扩展名 / Extension | 加载时间 / Load time | 说明 |
+|---|---|---|---|
+| 二进制压缩 / Binary compressed | `.dgz` | **~19 ms** | Delta 编码 + Gzip，生产环境推荐 |
+| 文本 / Text | `.txt` | ~110 ms | 运行时构建 FlatTrie，适合开发调试 |
+
+`initializeSync()` 自动检测词典格式——如果指定路径为 `dict.txt`，会先查找同目录下的 `dict.dgz`，找到则优先加载二进制格式：
+
+```dart
+// 自动优先加载 assets/dict.dgz（如果存在），否则加载 assets/dict.txt
+jieba.initializeSync(dictPath: 'assets/dict.txt');
+
+// 也可以直接指定 .dgz
+jieba.initializeSync(dictPath: 'assets/dict.dgz');
+```
+
+### 生成 .dgz 文件 / Generating .dgz from .txt
+
+```bash
+dart run tool/build_dict_bin.dart
+```
+
+此命令读取 `tool/dict.txt` 并生成 `assets/dict.dgz`。词典格式与 Python jieba 一致：
+
+This reads `tool/dict.txt` and produces `assets/dict.dgz`. Dictionary format same as Python jieba:
+
+```
+词语 词频 词性
+创新 5463 v
+中国科学院 150 nt
+```
+
+词频和词性可选，但词频影响分词结果。自定义词典也支持此格式。
+
+Freq and tag are optional, but freq affects segmentation results. Custom dictionaries use the same format.
+
 ## 自定义词典 / Custom dictionary
 
 ```dart
+// 使用自定义文本词典（运行时构建 FlatTrie，加载较慢）
 jieba.initializeSync(dictPath: '/path/to/custom_dict.txt');
+
+// 推荐先用 build_dict_bin.dart 生成 .dgz，然后加载二进制格式
+jieba.initializeSync(dictPath: '/path/to/custom_dict.dgz');
 ```
-
-词典格式与 Python jieba 一致：`词语 词频 词性`（词频和词性可选）。
-
-Dictionary format same as Python jieba: `word freq tag` (freq and tag optional).
 
 ## 性能对比 / Performance
 
