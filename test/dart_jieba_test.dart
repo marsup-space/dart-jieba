@@ -176,9 +176,9 @@ void main() {
   group('Dag', () {
     test('add and query edges', () {
       final dag = Dag(3);
-      dag.add(0, 1);
-      dag.add(0, 2);
-      dag.add(1, 2);
+      dag.add(0, 1, 0);
+      dag.add(0, 2, 0);
+      dag.add(1, 2, 0);
       expect(dag.edgesAt(0), [1, 2]);
       expect(dag.edgesAt(1), [2]);
       expect(dag.edgesAt(2), isEmpty);

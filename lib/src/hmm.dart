@@ -19,14 +19,12 @@ const _terminalStates = [_stateE, _stateS];
 List<String> hmmCut(String sentence) {
   if (sentence.isEmpty) return [];
 
-  final codepoints = sentence.runes.toList();
-  final length = codepoints.length;
+  final n = sentence.length;
+  final V = List<Float64List>.generate(n, (_) => Float64List(4));
+  final path = List<Int32List>.generate(n, (_) => Int32List(4));
 
-  final V = List<Float64List>.generate(length, (_) => Float64List(4));
-  final path = List<Int32List>.generate(length, (_) => Int32List(4));
-
-  for (int t = 0; t < length; t++) {
-    final cp = codepoints[t];
+  for (int t = 0; t < n; t++) {
+    final cp = sentence.codeUnitAt(t);
     if (t == 0) {
       for (int y = 0; y < 4; y++) {
         V[0][y] = probStart[y] + _emit(y, cp);
@@ -53,28 +51,28 @@ List<String> hmmCut(String sentence) {
   double bestFinal = double.negativeInfinity;
   int bestState = _stateS;
   for (final y in _terminalStates) {
-    if (V[length - 1][y] > bestFinal) {
-      bestFinal = V[length - 1][y];
+    if (V[n - 1][y] > bestFinal) {
+      bestFinal = V[n - 1][y];
       bestState = y;
     }
   }
 
-  final states = Int32List(length);
-  states[length - 1] = bestState;
-  for (int i = length - 2; i >= 0; i--) {
+  final states = Int32List(n);
+  states[n - 1] = bestState;
+  for (int i = n - 2; i >= 0; i--) {
     states[i] = path[i + 1][states[i + 1]];
   }
 
   final result = <String>[];
   int begin = 0;
-  for (int i = 0; i < length; i++) {
+  for (int i = 0; i < n; i++) {
     switch (states[i]) {
       case _stateB:
         begin = i;
       case _stateE:
-        result.add(String.fromCharCodes(codepoints.sublist(begin, i + 1)));
+        result.add(sentence.substring(begin, i + 1));
       case _stateS:
-        result.add(String.fromCharCodes(codepoints.sublist(i, i + 1)));
+        result.add(sentence.substring(i, i + 1));
       case _stateM:
         break;
     }
@@ -83,12 +81,12 @@ List<String> hmmCut(String sentence) {
   return result;
 }
 
-double _emit(int state, int rune) {
+double _emit(int state, int cu) {
   return switch (state) {
-    _stateB => probEmitB[rune] ?? -3.14e100,
-    _stateM => probEmitM[rune] ?? -3.14e100,
-    _stateE => probEmitE[rune] ?? -3.14e100,
-    _stateS => probEmitS[rune] ?? -3.14e100,
+    _stateB => probEmitB[cu] ?? -3.14e100,
+    _stateM => probEmitM[cu] ?? -3.14e100,
+    _stateE => probEmitE[cu] ?? -3.14e100,
+    _stateS => probEmitS[cu] ?? -3.14e100,
     _ => -3.14e100,
   };
 }

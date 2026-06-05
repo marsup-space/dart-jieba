@@ -43,7 +43,7 @@ class JiebaSegmenter {
   Future<void> initialize({String? dictPath}) async {
     if (_initialized && _dictPath == dictPath) return;
     _dictPath = dictPath;
-    await _loadDict(dictPath ?? _defaultDictPath());
+    _loadDict(dictPath ?? _defaultDictPath());
     _initialized = true;
   }
 
@@ -53,22 +53,58 @@ class JiebaSegmenter {
     return '$libDir/assets/dict.txt';
   }
 
-  Future<void> _loadDict(String path) async {
+  void _loadDict(String path) {
     final file = File(path);
-    if (!await file.exists()) {
+    if (!file.existsSync()) {
       throw StateError('Dictionary file not found: $path');
     }
-    final lines = await file.readAsLines(encoding: utf8);
+    final bytes = file.readAsBytesSync();
+    final lines = utf8.decoder.convert(bytes);
 
-    for (final line in lines) {
-      final trimmed = line.trim();
-      if (trimmed.isEmpty) continue;
-      final parts = trimmed.split(' ');
-      if (parts.length < 2) continue;
-      final word = parts[0];
-      final freq = int.tryParse(parts[1]) ?? 0;
-      _trie.insert(word, freq);
-      _total += freq;
+    int lineStart = 0;
+    final n = lines.length;
+    while (lineStart < n) {
+      int lineEnd = lineStart;
+      while (lineEnd < n &&
+          lines.codeUnitAt(lineEnd) != 0x0A &&
+          lines.codeUnitAt(lineEnd) != 0x0D) {
+        lineEnd++;
+      }
+
+      int spaceIdx = -1;
+      for (int i = lineStart; i < lineEnd; i++) {
+        if (lines.codeUnitAt(i) == 0x20) {
+          spaceIdx = i;
+          break;
+        }
+      }
+
+      if (spaceIdx > lineStart) {
+        final word = lines.substring(lineStart, spaceIdx);
+
+        int freqStart = spaceIdx + 1;
+        int freqEnd = freqStart;
+        while (freqEnd < lineEnd && lines.codeUnitAt(freqEnd) != 0x20) {
+          freqEnd++;
+        }
+
+        int freq = 0;
+        for (int i = freqStart; i < freqEnd; i++) {
+          final d = lines.codeUnitAt(i) - 0x30;
+          if (d < 0 || d > 9) break;
+          freq = freq * 10 + d;
+        }
+
+        _trie.insert(word, freq);
+        _total += freq;
+      }
+
+      lineStart = lineEnd + 1;
+      if (lineStart < n &&
+          lines.codeUnitAt(lineStart - 1) == 0x0D &&
+          lines.codeUnitAt(lineStart) == 0x0A) {
+        lineStart++;
+      }
     }
   }
 
@@ -116,32 +152,28 @@ class JiebaSegmenter {
     _checkInitialized();
     if (sentence.isEmpty) return [];
 
-    final reHan = _reHanDefault;
-    final reSkip = _reSkipDefault;
-
-    List<String> Function(String) cutBlock;
-    if (cutAll) {
-      cutBlock = _cutAll;
-    } else if (hmm) {
-      cutBlock = _cutDag;
-    } else {
-      cutBlock = _cutDagNoHmm;
-    }
-
     final result = <String>[];
-    final blocks = _splitWithCapture(reHan, sentence);
+    final blocks = _splitWithCapture(_reHanDefault, sentence);
     for (final blk in blocks) {
       if (blk.isEmpty) continue;
-      if (reHan.hasMatch(blk)) {
-        result.addAll(cutBlock(blk));
+      if (_reHanDefault.hasMatch(blk)) {
+        if (cutAll) {
+          result.addAll(_cutAll(blk));
+        } else if (hmm) {
+          result.addAll(_cutDag(blk));
+        } else {
+          result.addAll(_cutDagNoHmm(blk));
+        }
       } else {
-        final tmp = _splitWithCapture(reSkip, blk);
+        final tmp = _splitWithCapture(_reSkipDefault, blk);
         for (final x in tmp) {
           if (x.isEmpty) continue;
-          if (reSkip.hasMatch(x)) {
+          if (_reSkipDefault.hasMatch(x)) {
             result.add(x);
           } else if (!cutAll) {
-            result.addAll(x.split(''));
+            for (int i = 0; i < x.length; i++) {
+              result.add(x.substring(i, i + 1));
+            }
           } else {
             result.add(x);
           }
@@ -155,18 +187,18 @@ class JiebaSegmenter {
     final words = cut(sentence, hmm: hmm);
     final result = <String>[];
     for (final w in words) {
-      final runes = w.runes.toList();
-      if (runes.length > 2) {
-        for (int i = 0; i < runes.length - 1; i++) {
-          final gram2 = String.fromCharCodes(runes.sublist(i, i + 2));
+      final wLen = w.length;
+      if (wLen > 2) {
+        for (int i = 0; i < wLen - 1; i++) {
+          final gram2 = w.substring(i, i + 2);
           if (_trie.contains(gram2)) {
             result.add(gram2);
           }
         }
       }
-      if (runes.length > 3) {
-        for (int i = 0; i < runes.length - 2; i++) {
-          final gram3 = String.fromCharCodes(runes.sublist(i, i + 3));
+      if (wLen > 3) {
+        for (int i = 0; i < wLen - 2; i++) {
+          final gram3 = w.substring(i, i + 3);
           if (_trie.contains(gram3)) {
             result.add(gram3);
           }
@@ -179,78 +211,65 @@ class JiebaSegmenter {
 
   List<String> _cutDag(String sentence) {
     final dag = buildDag(sentence, _trie);
-    final route = calcRoute(sentence, dag, _trie, _total);
-    final runes = sentence.runes.toList();
-    final n = runes.length;
+    final route = calcRoute(sentence, dag, _total);
+    final n = sentence.length;
+    final endIndex = route.endIndex;
     final result = <String>[];
     final buf = StringBuffer();
     int x = 0;
 
     while (x < n) {
-      final y = route.endIndex[x];
-      final lWord = String.fromCharCodes(runes.sublist(x, y));
+      final y = endIndex[x];
       if (y - x == 1) {
-        buf.write(lWord);
+        buf.writeCharCode(sentence.codeUnitAt(x));
       } else {
-        if (buf.isNotEmpty) {
-          final bufStr = buf.toString();
-          buf.clear();
-          if (bufStr.runes.length == 1) {
-            result.add(bufStr);
-          } else {
-            if (!_trie.contains(bufStr)) {
-              result.addAll(_finalsegCut(bufStr));
-            } else {
-              for (final elem in bufStr.split('')) {
-                result.add(elem);
-              }
-            }
-          }
-        }
-        result.add(lWord);
+        _flushBuf(result, buf);
+        result.add(sentence.substring(x, y));
       }
       x = y;
     }
 
-    if (buf.isNotEmpty) {
-      final bufStr = buf.toString();
-      if (bufStr.runes.length == 1) {
-        result.add(bufStr);
-      } else if (!_trie.contains(bufStr)) {
-        result.addAll(_finalsegCut(bufStr));
-      } else {
-        for (final elem in bufStr.split('')) {
-          result.add(elem);
-        }
+    _flushBuf(result, buf);
+    return result;
+  }
+
+  void _flushBuf(List<String> result, StringBuffer buf) {
+    if (buf.isEmpty) return;
+    final bufStr = buf.toString();
+    buf.clear();
+    if (bufStr.length == 1) {
+      result.add(bufStr);
+    } else if (!_trie.contains(bufStr)) {
+      result.addAll(_finalsegCut(bufStr));
+    } else {
+      for (int i = 0; i < bufStr.length; i++) {
+        result.add(bufStr.substring(i, i + 1));
       }
     }
-
-    return result;
   }
 
   List<String> _cutDagNoHmm(String sentence) {
     final dag = buildDag(sentence, _trie);
-    final route = calcRoute(sentence, dag, _trie, _total);
-    final runes = sentence.runes.toList();
-    final n = runes.length;
+    final route = calcRoute(sentence, dag, _total);
+    final n = sentence.length;
+    final endIndex = route.endIndex;
     final result = <String>[];
     final buf = StringBuffer();
     int x = 0;
 
     while (x < n) {
-      final y = route.endIndex[x];
-      final lWord = String.fromCharCodes(runes.sublist(x, y));
-      if (_reEng.hasMatch(lWord) && lWord.runes.length == 1) {
+      final y = endIndex[x];
+      final lWord = sentence.substring(x, y);
+      if (_reEng.hasMatch(lWord) && y - x == 1) {
         buf.write(lWord);
-        x = y;
       } else {
         if (buf.isNotEmpty) {
           result.add(buf.toString());
           buf.clear();
         }
         result.add(lWord);
-        x = y;
       }
+      x = y;
     }
 
     if (buf.isNotEmpty) {
@@ -262,46 +281,24 @@ class JiebaSegmenter {
 
   List<String> _cutAll(String sentence) {
     final dag = buildDag(sentence, _trie);
-    final runes = sentence.runes.toList();
-    final n = runes.length;
+    final n = sentence.length;
     final result = <String>[];
     int oldJ = -1;
-    int engScan = 0;
-    String engBuf = '';
 
     for (int k = 0; k < n; k++) {
       final L = dag.edgesAt(k);
-      if (engScan == 1 && !_reEng.hasMatch(String.fromCharCode(runes[k]))) {
-        engScan = 0;
-        result.add(engBuf);
-        engBuf = '';
-      }
       if (L.length == 1 && k > oldJ) {
-        final word = String.fromCharCodes(runes.sublist(k, L[0]));
-        if (_reEng.hasMatch(word)) {
-          if (engScan == 0) {
-            engScan = 1;
-            engBuf = word;
-          } else {
-            engBuf += word;
-          }
-        }
-        if (engScan == 0) {
-          result.add(word);
-        }
+        final word = sentence.substring(k, L[0]);
+        result.add(word);
         oldJ = L[0] - 1;
       } else {
         for (final j in L) {
           if (j > k + 1) {
-            result.add(String.fromCharCodes(runes.sublist(k, j)));
+            result.add(sentence.substring(k, j));
             oldJ = j - 1;
           }
         }
       }
-    }
-
-    if (engScan == 1) {
-      result.add(engBuf);
     }
 
     return result;
@@ -317,8 +314,8 @@ class JiebaSegmenter {
           if (!_forceSplitWords.contains(word)) {
             result.add(word);
           } else {
-            for (final c in word.split('')) {
-              result.add(c);
+            for (int i = 0; i < word.length; i++) {
+              result.add(word.substring(i, i + 1));
             }
           }
         }
