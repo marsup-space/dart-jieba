@@ -37,8 +37,12 @@ class JiebaSegmenter {
   }
 
   Future<void> initialize({String? dictPath}) async {
+    initializeSync(dictPath: dictPath);
+  }
+
+  void initializeSync({String? dictPath}) {
     if (_initialized && _dictPath == dictPath) return;
-    _dictPath = dictPath;
+    _dictPath = dictPath ?? _findDefaultDict();
 
     final binPath = _dictPath!.replaceAll(RegExp(r'\.txt$'), '.dgz');
     final binFile = File(binPath);
@@ -48,6 +52,15 @@ class JiebaSegmenter {
       _trie = _loadTextDict(_dictPath!);
     }
     _initialized = true;
+    _instance ??= this;
+  }
+
+  static String _findDefaultDict() {
+    final candidates = ['assets/dict.txt', 'dart-jieba/assets/dict.txt'];
+    for (final c in candidates) {
+      if (File(c).existsSync()) return c;
+    }
+    throw StateError('No dict.dgz or dict.txt found');
   }
 
   FlatTrie _loadTextDict(String path) {
