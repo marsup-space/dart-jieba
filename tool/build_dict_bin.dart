@@ -34,7 +34,8 @@ void _deltaEncode16(Uint16List arr) {
 
 void main() {
   final trie = Trie();
-  final file = File('/home/wu/marsup/crux/dart-jieba/assets/dict.txt');
+  final scriptDir = File.fromUri(Platform.script).parent.path;
+  final file = File('$scriptDir/dict.txt');
   final text = utf8.decoder.convert(file.readAsBytesSync());
   int total = 0;
   int lineStart = 0;
@@ -151,12 +152,10 @@ void main() {
 
   // Write compressed dict.dgz (delta-encoded + gzip)
   final compressed = gzip.encode(rawBytes);
-  final outPath = '/home/wu/marsup/crux/dart-jieba/assets/dict.dgz';
+  final outPath = '$scriptDir/../assets/dict.dgz';
   File(outPath).writeAsBytesSync(compressed);
 
-  final txtSize = File(
-    '/home/wu/marsup/crux/dart-jieba/assets/dict.txt',
-  ).lengthSync();
+  final txtSize = File('$scriptDir/dict.txt').lengthSync();
   print('Format v4 (delta-encoded + gzip):');
   print('  Nodes: $nodeCount');
   print('  Edges: $edgeCount');

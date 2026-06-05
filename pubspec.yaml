@@ -1,11 +1,11 @@
 name: dart_jieba
-description: Pure Dart port of Python jieba for Chinese text segmentation
+description: Pure Dart Chinese text segmentation — a port of Python jieba with binary trie and delta-gzip compression.
 version: 0.1.0
 repository: https://github.com/marsup-space/dart-jieba
+license: MIT
 
 environment:
-  sdk: ^3.11.5
-
+  sdk: ^3.5.0
 
 dev_dependencies:
   lints: ^6.0.0
