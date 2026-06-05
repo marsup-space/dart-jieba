@@ -16,6 +16,10 @@ const _prevStatus = <int, List<int>>{
 
 const _terminalStates = [_stateE, _stateS];
 
+/// Segments a Chinese-only string using the Hidden Markov Model (Viterbi).
+///
+/// Used as a fallback for out-of-vocabulary words not found in the trie.
+/// States: B(begin), M(middle), E(end), S(single).
 List<String> hmmCut(String sentence) {
   if (sentence.isEmpty) return [];
 

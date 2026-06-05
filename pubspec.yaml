@@ -1,6 +1,6 @@
 name: dart_jieba
-description: 大结巴 — Pure Dart 中文分词，Python jieba 完整移植，binary trie + delta-gzip.
-version: 1.0.0
+description: DaJieBa - Pure Dart Chinese text segmentation, a port of Python jieba with binary trie and delta-gzip compression.
+version: 1.0.1
 repository: https://github.com/marsup-space/dart-jieba
 license: MIT
 

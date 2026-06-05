@@ -13,6 +13,23 @@ final _reEng = RegExp(r'[a-zA-Z0-9]');
 final _reHanFinalseg = RegExp(r'[\u4E00-\u9FD5]+');
 final _reSkipFinalseg = RegExp(r'([a-zA-Z0-9]+(?:\.\d+)?%?)');
 
+/// Chinese text segmenter using the jieba algorithm.
+///
+/// Supports three segmentation modes:
+/// - **Accurate** (default): most precise, uses DAG + HMM for OOV words
+/// - **Full**: all possible word combinations
+/// - **Search engine**: further splits long words for search indexing
+///
+/// Dictionary can be loaded from a compressed binary file (`.dgz`, ~19ms)
+/// or a plain text file (`.txt`, ~110ms). When a `.txt` path is specified,
+/// the loader first checks for a corresponding `.dgz` file.
+///
+/// ```dart
+/// final jieba = JiebaSegmenter();
+/// jieba.initializeSync();
+/// print(jieba.cut('我来到北京清华大学'));
+/// // [我, 来到, 北京, 清华大学]
+/// ```
 class JiebaSegmenter {
   late FlatTrie _trie;
   bool _initialized = false;
@@ -21,8 +38,13 @@ class JiebaSegmenter {
 
   static JiebaSegmenter? _instance;
 
+  /// Creates a new [JiebaSegmenter]. Call [initializeSync] or [load] before use.
   JiebaSegmenter();
 
+  /// Loads and initializes the singleton segmenter asynchronously.
+  ///
+  /// Returns the cached instance if already loaded.
+  /// [dictPath] is optional; auto-detects `assets/dict.dgz` or `assets/dict.txt`.
   static Future<JiebaSegmenter> load({String? dictPath}) async {
     if (_instance != null) return _instance!;
     final s = JiebaSegmenter();
@@ -31,6 +53,7 @@ class JiebaSegmenter {
     return s;
   }
 
+  /// Returns the singleton instance. Throws if [load] hasn't been called.
   static JiebaSegmenter get instance {
     if (_instance == null) {
       throw StateError('JiebaSegmenter not loaded. Call load() first.');
@@ -38,10 +61,15 @@ class JiebaSegmenter {
     return _instance!;
   }
 
+  /// Initializes the segmenter asynchronously. Delegates to [initializeSync].
   Future<void> initialize({String? dictPath}) async {
     initializeSync(dictPath: dictPath);
   }
 
+  /// Initializes the segmenter synchronously.
+  ///
+  /// If [dictPath] is null, auto-detects `assets/dict.dgz` or `assets/dict.txt`.
+  /// When [dictPath] ends in `.txt`, checks for a `.dgz` file first.
   void initializeSync({String? dictPath}) {
     if (_initialized && _dictPath == dictPath) return;
     _dictPath = dictPath ?? _findDefaultDict();
@@ -113,6 +141,10 @@ class JiebaSegmenter {
     return FlatTrie.fromTrie(trie, total);
   }
 
+  /// Segments [sentence] into words.
+  ///
+  /// - [cutAll]: if true, returns all possible word combinations (full mode).
+  /// - [hmm]: if true (default), uses HMM for out-of-vocabulary words.
   List<String> cut(String sentence, {bool cutAll = false, bool hmm = true}) {
     _checkInitialized();
     if (sentence.isEmpty) return [];
@@ -148,6 +180,10 @@ class JiebaSegmenter {
     return result;
   }
 
+  /// Segments [sentence] for search engine indexing.
+  ///
+  /// Like [cut], but further splits long words into shorter grams
+  /// that exist in the dictionary.
   List<String> cutForSearch(String sentence, {bool hmm = true}) {
     final words = cut(sentence, hmm: hmm);
     final result = <String>[];

@@ -3,6 +3,10 @@ import 'dart:typed_data';
 
 import 'trie.dart';
 
+/// Compact flat-array trie with binary search on sorted children.
+///
+/// Zero-copy loaded from a `.dgz` binary file via [load] or [fromBytes].
+/// Can also be built from a [Trie] at runtime via [fromTrie].
 class FlatTrie {
   final Uint32List _freqs;
   final Uint32List _firstChild;
@@ -12,7 +16,10 @@ class FlatTrie {
   final int _rootIdx;
   final int _total;
 
+  /// Sum of all word frequencies in the dictionary.
   int get total => _total;
+
+  /// Whether the trie is empty.
   bool get isEmpty => _freqs.isEmpty;
 
   FlatTrie._(
@@ -25,6 +32,9 @@ class FlatTrie {
     this._total,
   );
 
+  /// Loads a FlatTrie from the binary file at [path].
+  ///
+  /// Supports gzip-compressed `.dgz` files (v3/v4) and uncompressed binary.
   static FlatTrie load(String path) {
     final file = File(path);
     if (!file.existsSync()) {
@@ -34,6 +44,7 @@ class FlatTrie {
     return fromBytes(bytes);
   }
 
+  /// Decodes a FlatTrie from raw [bytes] (gzip-compressed or uncompressed).
   static FlatTrie fromBytes(Uint8List bytes) {
     // Detect gzip-compressed dict (magic 0x1f8b)
     if (bytes.length >= 2 && bytes[0] == 0x1F && bytes[1] == 0x8B) {
@@ -187,6 +198,7 @@ class FlatTrie {
     }
   }
 
+  /// Returns the frequency of [word], or 0 if not found.
   int freqOf(String word) {
     var nodeIdx = _rootIdx;
     for (int i = 0; i < word.length; i++) {
@@ -196,6 +208,7 @@ class FlatTrie {
     return _freqs[nodeIdx];
   }
 
+  /// Returns true if [word] exists in the trie with freq > 0.
   bool contains(String word) {
     var nodeIdx = _rootIdx;
     for (int i = 0; i < word.length; i++) {
@@ -205,6 +218,7 @@ class FlatTrie {
     return _freqs[nodeIdx] > 0;
   }
 
+  /// Returns true if [word] is a prefix of any entry in the trie.
   bool containsPrefix(String word) {
     var nodeIdx = _rootIdx;
     for (int i = 0; i < word.length; i++) {
@@ -234,10 +248,16 @@ class FlatTrie {
     return -1;
   }
 
+  /// Index of the root node (always 0 for BFS-ordered tries).
   int get rootIdx => _rootIdx;
+
+  /// Frequency of the node at [nodeIdx].
   int freqOfIdx(int nodeIdx) => _freqs[nodeIdx];
+
+  /// Finds the child of [parentIdx] along edge [cp], or -1 if not found.
   int findChild(int parentIdx, int cp) => _findChild(parentIdx, cp);
 
+  /// Builds a FlatTrie from a Map-based [trie] with the given [totalFreq].
   static FlatTrie fromTrie(Trie trie, int totalFreq) {
     final nodeIndex = <TrieNode, int>{};
     final nodeList = <TrieNode>[];
