@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'trie.dart';
@@ -5,34 +7,28 @@ import 'dag.dart';
 import 'route.dart';
 import 'hmm.dart';
 
-final _reHan = RegExp(
-  r'([\u4E00-\u9FD5\u3400-\u4DBF\U00020000-\U0002A6DF\uF900-\uFAFF]+)',
-);
-final _reSkip = RegExp(r'([a-zA-Z0-9]+(?:\.\d+)?|[a-zA-Z0-9]+)');
-
-bool _isCjkRune(int rune) {
-  return (rune >= 0x4E00 && rune <= 0x9FD5) ||
-      (rune >= 0x3400 && rune <= 0x4DBF) ||
-      (rune >= 0x20000 && rune <= 0x2A6DF) ||
-      (rune >= 0x2A700 && rune <= 0x2B73F) ||
-      (rune >= 0xF900 && rune <= 0xFAFF);
-}
+final _reHanDefault = RegExp(r'[\u4E00-\u9FD5a-zA-Z0-9+#&\._%\-]+');
+final _reSkipDefault = RegExp(r'\r\n|\s');
+final _reEng = RegExp(r'[a-zA-Z0-9]');
+final _reHanFinalseg = RegExp(r'[\u4E00-\u9FD5]+');
+final _reSkipFinalseg = RegExp(r'[a-zA-Z0-9]+(?:\.\d+)?%?');
+final _reUserdict = RegExp(r'^(.+?)( [0-9]+)?( [a-z]+)?$');
 
 class JiebaSegmenter {
-  final Trie _trie;
-  double _totalFreq = 0; // updated during _loadDict
+  final Trie _trie = Trie();
+  int _total = 0;
+  final Set<String> _forceSplitWords = {};
   bool _initialized = false;
-
-  JiebaSegmenter._() : _trie = Trie();
+  String? _dictPath;
 
   static JiebaSegmenter? _instance;
 
+  JiebaSegmenter();
+
   static Future<JiebaSegmenter> load({String? dictPath}) async {
     if (_instance != null) return _instance!;
-    final s = JiebaSegmenter._();
-    await s._loadDict(dictPath ?? 'assets/dict.txt');
-    s._loadHmmData();
-    s._initialized = true;
+    final s = JiebaSegmenter();
+    await s.initialize(dictPath: dictPath);
     _instance = s;
     return s;
   }
@@ -44,133 +40,321 @@ class JiebaSegmenter {
     return _instance!;
   }
 
-  List<String> cut(String sentence, {bool hmm = true}) {
-    if (!_initialized) {
-      throw StateError('JiebaSegmenter not loaded. Call load() first.');
-    }
-    if (sentence.isEmpty) return [];
-
-    final result = <String>[];
-    final blocks = sentence.split(_reHan);
-    for (final block in blocks) {
-      if (block.isEmpty) continue;
-      if (_reHan.hasMatch(block)) {
-        result.addAll(_cutDag(block, hmm: hmm));
-      } else {
-        result.addAll(_splitNonCjk(block));
-      }
-    }
-    return result;
+  Future<void> initialize({String? dictPath}) async {
+    if (_initialized && _dictPath == dictPath) return;
+    _dictPath = dictPath;
+    await _loadDict(dictPath ?? _defaultDictPath());
+    _initialized = true;
   }
 
-  List<String> _cutDag(String sentence, {required bool hmm}) {
-    final dag = _buildDag(sentence);
-    final route = _calcRoute(sentence, dag);
-    final result = <String>[];
-    final runes = sentence.runes.toList();
-    int i = 0;
-
-    while (i < runes.length) {
-      final j = route.endIndex[i];
-      if (j == i + 1 && _isCjkRune(runes[i]) && hmm) {
-        final oovRun = _collectOovRun(runes, i, route);
-        if (oovRun.isNotEmpty) {
-          result.addAll(hmmCut(String.fromCharCodes(oovRun)));
-          i += oovRun.length;
-          continue;
-        }
-      }
-      result.add(String.fromCharCodes(runes.sublist(i, j)));
-      i = j;
-    }
-    return result;
-  }
-
-  Dag _buildDag(String sentence) {
-    final runes = sentence.runes.toList();
-    final dag = Dag(runes.length);
-    for (int i = 0; i < runes.length; i++) {
-      var node = _trie.root;
-      dag.add(i, i + 1);
-      for (int k = i + 1; k < runes.length; k++) {
-        final next = node.children?[runes[k]];
-        if (next == null) break;
-        node = next;
-        if (node.isTerminal) {
-          dag.add(i, k + 1);
-        }
-      }
-    }
-    return dag;
-  }
-
-  Route _calcRoute(String sentence, Dag dag) {
-    final runes = sentence.runes.toList();
-    final n = runes.length;
-    final route = Route(n);
-    route.logProbs[n] = 0.0;
-    route.endIndex[n] = n;
-    for (int i = n - 1; i >= 0; i--) {
-      double bestLogProb = double.negativeInfinity;
-      int bestEnd = i + 1;
-      for (final j in dag.edgesAt(i)) {
-        final word = String.fromCharCodes(runes.sublist(i, j));
-        final freq = _trie.freqOf(word).toDouble();
-        double logProb;
-        if (freq > 0) {
-          logProb = math.log(freq / _totalFreq);
-        } else {
-          logProb = math.log(1.0 / (_totalFreq * math.pow(runes.length, 1.5)));
-        }
-        final v = logProb + route.logProbs[j];
-        if (v > bestLogProb) {
-          bestLogProb = v;
-          bestEnd = j;
-        }
-      }
-      route.logProbs[i] = bestLogProb;
-      route.endIndex[i] = bestEnd;
-    }
-    return route;
-  }
-
-  List<int> _collectOovRun(List<int> runes, int start, Route route) {
-    final oov = <int>[];
-    int i = start;
-    while (i < runes.length) {
-      if (!_isCjkRune(runes[i])) break;
-      if (route.endIndex[i] == i + 1) {
-        oov.add(runes[i]);
-        i++;
-      } else {
-        break;
-      }
-    }
-    return oov;
-  }
-
-  List<String> _splitNonCjk(String block) {
-    final result = <String>[];
-    final parts = _reSkip.allMatches(block);
-    var lastEnd = 0;
-    for (final m in parts) {
-      if (m.start > lastEnd) {
-        result.add(block.substring(lastEnd, m.start));
-      }
-      result.add(m.group(0)!);
-      lastEnd = m.end;
-    }
-    if (lastEnd < block.length) {
-      result.add(block.substring(lastEnd));
-    }
-    return result;
+  String _defaultDictPath() {
+    final scriptPath = Platform.script.toFilePath();
+    final libDir = scriptPath.substring(0, scriptPath.lastIndexOf('/'));
+    return '$libDir/assets/dict.txt';
   }
 
   Future<void> _loadDict(String path) async {
-    // TODO: Load dict.txt from assets
+    final file = File(path);
+    if (!await file.exists()) {
+      throw StateError('Dictionary file not found: $path');
+    }
+    final lines = await file.readAsLines(encoding: utf8);
+
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      final parts = trimmed.split(' ');
+      if (parts.length < 2) continue;
+      final word = parts[0];
+      final freq = int.tryParse(parts[1]) ?? 0;
+      _trie.insert(word, freq);
+      _total += freq;
+    }
   }
 
-  void _loadHmmData() {
-    // TODO: Load HMM probability data from finalseg
+  Future<void> loadUserDict(String path) async {
+    _checkInitialized();
+    final file = File(path);
+    final lines = await file.readAsLines(encoding: utf8);
+    for (final ln in lines) {
+      final line = ln.trim();
+      if (line.isEmpty) continue;
+      final match = _reUserdict.firstMatch(line);
+      if (match == null) continue;
+      final word = match.group(1)!;
+      final freqStr = match.group(2)?.trim();
+      final freq = freqStr != null ? int.tryParse(freqStr) : null;
+      addWord(word, freq: freq);
+    }
+  }
+
+  void addWord(String word, {int? freq}) {
+    _checkInitialized();
+    freq ??= _suggestFreq(word);
+    _trie.insert(word, freq);
+    _total += freq;
+    if (freq == 0) {
+      _forceSplitWords.add(word);
+    }
+  }
+
+  void delWord(String word) {
+    addWord(word, freq: 0);
+  }
+
+  int _suggestFreq(String segment) {
+    _checkInitialized();
+    final ftotal = _total.toDouble();
+    double freq = 1.0;
+    for (final seg in cut(segment, hmm: false)) {
+      freq *= _trie.freqOf(seg).toDouble() / ftotal;
+    }
+    return math.max((freq * _total).toInt() + 1, _trie.freqOf(segment));
+  }
+
+  List<String> cut(String sentence, {bool cutAll = false, bool hmm = true}) {
+    _checkInitialized();
+    if (sentence.isEmpty) return [];
+
+    final reHan = _reHanDefault;
+    final reSkip = _reSkipDefault;
+
+    List<String> Function(String) cutBlock;
+    if (cutAll) {
+      cutBlock = _cutAll;
+    } else if (hmm) {
+      cutBlock = _cutDag;
+    } else {
+      cutBlock = _cutDagNoHmm;
+    }
+
+    final result = <String>[];
+    final blocks = _splitWithCapture(reHan, sentence);
+    for (final blk in blocks) {
+      if (blk.isEmpty) continue;
+      if (reHan.hasMatch(blk)) {
+        result.addAll(cutBlock(blk));
+      } else {
+        final tmp = _splitWithCapture(reSkip, blk);
+        for (final x in tmp) {
+          if (x.isEmpty) continue;
+          if (reSkip.hasMatch(x)) {
+            result.add(x);
+          } else if (!cutAll) {
+            result.addAll(x.split(''));
+          } else {
+            result.add(x);
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  List<String> cutForSearch(String sentence, {bool hmm = true}) {
+    final words = cut(sentence, hmm: hmm);
+    final result = <String>[];
+    for (final w in words) {
+      final runes = w.runes.toList();
+      if (runes.length > 2) {
+        for (int i = 0; i < runes.length - 1; i++) {
+          final gram2 = String.fromCharCodes(runes.sublist(i, i + 2));
+          if (_trie.contains(gram2)) {
+            result.add(gram2);
+          }
+        }
+      }
+      if (runes.length > 3) {
+        for (int i = 0; i < runes.length - 2; i++) {
+          final gram3 = String.fromCharCodes(runes.sublist(i, i + 3));
+          if (_trie.contains(gram3)) {
+            result.add(gram3);
+          }
+        }
+      }
+      result.add(w);
+    }
+    return result;
+  }
+
+  List<String> _cutDag(String sentence) {
+    final dag = buildDag(sentence, _trie);
+    final route = calcRoute(sentence, dag, _trie, _total);
+    final runes = sentence.runes.toList();
+    final n = runes.length;
+    final result = <String>[];
+    final buf = StringBuffer();
+    int x = 0;
+
+    while (x < n) {
+      final y = route.endIndex[x];
+      final lWord = String.fromCharCodes(runes.sublist(x, y));
+      if (y - x == 1) {
+        buf.write(lWord);
+      } else {
+        if (buf.isNotEmpty) {
+          final bufStr = buf.toString();
+          buf.clear();
+          if (bufStr.runes.length == 1) {
+            result.add(bufStr);
+          } else {
+            if (!_trie.contains(bufStr)) {
+              result.addAll(_finalsegCut(bufStr));
+            } else {
+              for (final elem in bufStr.split('')) {
+                result.add(elem);
+              }
+            }
+          }
+        }
+        result.add(lWord);
+      }
+      x = y;
+    }
+
+    if (buf.isNotEmpty) {
+      final bufStr = buf.toString();
+      if (bufStr.runes.length == 1) {
+        result.add(bufStr);
+      } else if (!_trie.contains(bufStr)) {
+        result.addAll(_finalsegCut(bufStr));
+      } else {
+        for (final elem in bufStr.split('')) {
+          result.add(elem);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  List<String> _cutDagNoHmm(String sentence) {
+    final dag = buildDag(sentence, _trie);
+    final route = calcRoute(sentence, dag, _trie, _total);
+    final runes = sentence.runes.toList();
+    final n = runes.length;
+    final result = <String>[];
+    final buf = StringBuffer();
+    int x = 0;
+
+    while (x < n) {
+      final y = route.endIndex[x];
+      final lWord = String.fromCharCodes(runes.sublist(x, y));
+      if (_reEng.hasMatch(lWord) && lWord.runes.length == 1) {
+        buf.write(lWord);
+        x = y;
+      } else {
+        if (buf.isNotEmpty) {
+          result.add(buf.toString());
+          buf.clear();
+        }
+        result.add(lWord);
+        x = y;
+      }
+    }
+
+    if (buf.isNotEmpty) {
+      result.add(buf.toString());
+    }
+
+    return result;
+  }
+
+  List<String> _cutAll(String sentence) {
+    final dag = buildDag(sentence, _trie);
+    final runes = sentence.runes.toList();
+    final n = runes.length;
+    final result = <String>[];
+    int oldJ = -1;
+    int engScan = 0;
+    String engBuf = '';
+
+    for (int k = 0; k < n; k++) {
+      final L = dag.edgesAt(k);
+      if (engScan == 1 && !_reEng.hasMatch(String.fromCharCode(runes[k]))) {
+        engScan = 0;
+        result.add(engBuf);
+        engBuf = '';
+      }
+      if (L.length == 1 && k > oldJ) {
+        final word = String.fromCharCodes(runes.sublist(k, L[0]));
+        if (_reEng.hasMatch(word)) {
+          if (engScan == 0) {
+            engScan = 1;
+            engBuf = word;
+          } else {
+            engBuf += word;
+          }
+        }
+        if (engScan == 0) {
+          result.add(word);
+        }
+        oldJ = L[0] - 1;
+      } else {
+        for (final j in L) {
+          if (j > k + 1) {
+            result.add(String.fromCharCodes(runes.sublist(k, j)));
+            oldJ = j - 1;
+          }
+        }
+      }
+    }
+
+    if (engScan == 1) {
+      result.add(engBuf);
+    }
+
+    return result;
+  }
+
+  List<String> _finalsegCut(String sentence) {
+    final result = <String>[];
+    final blocks = _splitWithCapture(_reHanFinalseg, sentence);
+    for (final blk in blocks) {
+      if (blk.isEmpty) continue;
+      if (_reHanFinalseg.hasMatch(blk)) {
+        for (final word in hmmCut(blk)) {
+          if (!_forceSplitWords.contains(word)) {
+            result.add(word);
+          } else {
+            for (final c in word.split('')) {
+              result.add(c);
+            }
+          }
+        }
+      } else {
+        final tmp = _splitWithCapture(_reSkipFinalseg, blk);
+        for (final x in tmp) {
+          if (x.isNotEmpty) {
+            result.add(x);
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  List<String> _splitWithCapture(RegExp pattern, String input) {
+    final result = <String>[];
+    int lastEnd = 0;
+    for (final match in pattern.allMatches(input)) {
+      if (match.start > lastEnd) {
+        result.add(input.substring(lastEnd, match.start));
+      }
+      result.add(match.group(0)!);
+      lastEnd = match.end;
+    }
+    if (lastEnd < input.length) {
+      result.add(input.substring(lastEnd));
+    }
+    return result;
+  }
+
+  void _checkInitialized() {
+    if (!_initialized) {
+      throw StateError(
+        'JiebaSegmenter not initialized. Call initialize() first.',
+      );
+    }
   }
 }
