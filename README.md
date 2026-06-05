@@ -1,4 +1,4 @@
-# dart_jieba
+# dart_jieba | 大结巴
 
 [![pub.dev](https://img.shields.io/pub/v/dart_jieba.svg)](https://pub.dev/packages/dart_jieba)
 
