@@ -2,7 +2,7 @@
 ///
 /// Supports accurate mode, full mode, and search engine mode segmentation
 /// with binary trie (`.dgz`) and text dictionary (`.txt`) loading.
-library dart_jieba;
+library;
 
 export 'src/segmenter.dart';
 export 'src/trie.dart';
